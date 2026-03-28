@@ -1,142 +1,121 @@
 import json
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 import requests
-from datetime import datetime
-import pytz
+
+from util.time_util import format_now, get_beijing_time
 
 
-def get_beijing_time():
-    """获取北京时间"""
-    target_timezone = pytz.timezone('Asia/Shanghai')
-    return datetime.now().astimezone(target_timezone)
+REQUEST_TIMEOUT = 10
 
 
-def format_now():
-    """格式化当前时间"""
-    return get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
-
-
+@dataclass(frozen=True)
 class PushConfig:
-    """推送配置类"""
+    """推送配置。"""
 
-    def __init__(self,
-                 push_plus_token=None,
-                 push_plus_hour=None,
-                 push_plus_max=30,
-                 push_wechat_webhook_key=None,
-                 telegram_bot_token=None,
-                 telegram_chat_id=None):
-        self.push_plus_token = push_plus_token
-        self.push_plus_hour = push_plus_hour
-        self.push_plus_max = int(push_plus_max) if push_plus_max else 30
-        self.push_wechat_webhook_key = push_wechat_webhook_key
-        self.telegram_bot_token = telegram_bot_token
-        self.telegram_chat_id = telegram_chat_id
+    push_plus_token: str | None = None
+    push_plus_hour: int | None = None
+    push_plus_max: int = 30
+    push_wechat_webhook_key: str | None = None
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
 
 
-def push_plus(token, title, content):
-    """
-    推送消息类型为html 需要在外部组装html代码的content
-    :param token: PUSHPLUS 的token
-    :param title: 推送标题
-    :param content: 推送内容
-    :return: none
-    """
-    requestUrl = f"http://www.pushplus.plus/send"
+def build_wechat_content(title: str, content: str) -> str:
+    return f"# {title}\n{content}"
+
+
+def push_plus(token: str, title: str, content: str) -> None:
+    """PushPlus 推送。"""
+    request_url = "http://www.pushplus.plus/send"
     data = {
         "token": token,
         "title": title,
         "content": content,
         "template": "html",
-        "channel": "wechat"
+        "channel": "wechat",
     }
     try:
-        response = requests.post(requestUrl, data=data)
-        if response.status_code == 200:
-            json_res = response.json()
-            print(f"pushplus推送完毕：{json_res['code']}-{json_res['msg']}")
-        else:
-            print("pushplus推送失败")
-    except requests.exceptions.RequestException as e:
-        print(f"pushplus推送网络异常: {e}")
-    except Exception as e:
-        print(f"pushplus推送未知异常: {e}")
+        response = requests.post(request_url, data=data, timeout=REQUEST_TIMEOUT)
+        if response.status_code != 200:
+            print(f"pushplus 推送失败，status: {response.status_code}")
+            return
+        json_res = response.json()
+        print(f"pushplus 推送完毕：{json_res.get('code')}-{json_res.get('msg')}")
+    except requests.exceptions.RequestException as exc:
+        print(f"pushplus 推送网络异常：{exc}")
+    except ValueError:
+        print("pushplus 推送失败，响应不是合法 JSON。")
 
 
-def push_wechat_webhook(key, title, content):
-    """
-    推送企业微信通知，WebHook方式，需要注册企业微信并配置机器人到对应的推送群。然后提取对应的key
-
-    :param key: WebHook机器人的key
-    :param title: 推送标题
-    :param content: 推送内容，虽然支持markdown，但是在使用微信插件时，消息不能被完整展示，直接使用纯文本效果会更好
-    :return:
-    """
-
-    requestUrl = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={key}"
-
+def push_wechat_webhook(key: str, title: str, content: str) -> None:
+    """企业微信 WebHook 推送。"""
+    request_url = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={key}"
     payload = {
         "msgtype": "markdown_v2",
         "markdown_v2": {
-            "content": buildWeChatContent(title, content)
-        }
+            "content": build_wechat_content(title, content),
+        },
     }
-
     try:
-        response = requests.post(requestUrl, json=payload)
-        if response.status_code == 200:
-            json_res = response.json()
-            if json_res.get('errcode') == 0:
-                print(f"企业微信推送完毕：{json_res['errmsg']}")
-            else:
-                print(f"企业微信推送失败：{json_res.get('errmsg', '未知错误')}")
+        response = requests.post(request_url, json=payload, timeout=REQUEST_TIMEOUT)
+        if response.status_code != 200:
+            print(f"企业微信推送失败，status: {response.status_code}")
+            return
+        json_res = response.json()
+        if json_res.get("errcode") == 0:
+            print(f"企业微信推送完毕：{json_res.get('errmsg')}")
         else:
-            print("企业微信推送失败")
-    except requests.exceptions.RequestException as e:
-        print(f"企业微信推送异常: {e}")
-    except Exception as e:
-        print(f"企业微信推送发生未知异常: {e}")
+            print(f"企业微信推送失败：{json_res.get('errmsg', '未知错误')}")
+    except requests.exceptions.RequestException as exc:
+        print(f"企业微信推送异常：{exc}")
+    except ValueError:
+        print("企业微信推送失败，响应不是合法 JSON。")
 
 
-def buildWeChatContent(title, content) -> str:
-    return f"""# {title}\n{content}"""
-
-
-def push_telegram_bot(bot_token, chat_id, content):
-    """
-    推送消息类型为html 需要在外部组装html content
-    :param bot_token: telegram bot token
-    :param chat_id: telegram bot chat_id
-    :param content: 推送内容
-    :return: none
-    """
-    requestUrl = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-
+def push_telegram_bot(bot_token: str, chat_id: str, content: str) -> None:
+    """Telegram Bot 推送。"""
+    request_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
         "chat_id": int(chat_id),
         "text": content,
-        "parse_mode": "HTML"
+        "parse_mode": "HTML",
     }
-    print(f"post to url: {requestUrl}")
-    print(f"payload: {json.dumps(payload)}")
     try:
-        response = requests.post(requestUrl, json=payload)
-        if response.status_code == 200:
-            json_res = response.json()
-            if json_res.get('ok') is True:
-                print(f"telegram bot推送完毕：{json_res['result']['message_id']}")
-            else:
-                print(f"telegram bot推送失败: {json.dumps(json_res)}")
+        response = requests.post(request_url, json=payload, timeout=REQUEST_TIMEOUT)
+        if response.status_code != 200:
+            print(f"telegram bot 推送失败，status: {response.status_code}")
+            return
+        json_res = response.json()
+        if json_res.get("ok") is True:
+            message_id = json_res.get("result", {}).get("message_id")
+            print(f"telegram bot 推送完毕：{message_id}")
         else:
-            print(f"telegram bot推送失败: {response.status_code}")
-    except requests.exceptions.RequestException as e:
-        print(f"telegram bot推送异常: {e}")
-    except Exception as e:
-        print(f"telegram bot推送发生未知异常: {e}")
+            print(f"telegram bot 推送失败：{json.dumps(json_res, ensure_ascii=False)}")
+    except requests.exceptions.RequestException as exc:
+        print(f"telegram bot 推送异常：{exc}")
+    except ValueError:
+        print("telegram bot 推送失败，响应不是合法 JSON。")
 
 
-def push_results(exec_results, summary, config: PushConfig):
-    """推送所有结果"""
+def not_in_push_time_range(config: PushConfig, now: datetime | None = None) -> bool:
+    """判断当前是否不在推送时间范围。"""
+    if config.push_plus_hour is None:
+        return False
+
+    current_hour = get_beijing_time(now).hour
+    if current_hour == config.push_plus_hour:
+        print(f"当前设置推送整点为：{config.push_plus_hour}，当前整点为：{current_hour}，执行推送。")
+        return False
+
+    print(f"当前北京时间整点为：{current_hour}，不在配置的推送时间 {config.push_plus_hour}，跳过推送。")
+    return True
+
+
+def push_results(exec_results: list[dict[str, Any]], summary: str, config: PushConfig) -> None:
+    """执行全部推送。"""
     if not_in_push_time_range(config):
         return
     push_to_push_plus(exec_results, summary, config)
@@ -144,98 +123,75 @@ def push_results(exec_results, summary, config: PushConfig):
     push_to_telegram_bot(exec_results, summary, config)
 
 
-def not_in_push_time_range(config: PushConfig) -> bool:
-    """检查是否在推送时间范围内"""
-    if not config.push_plus_hour:
-        return False  # 如果没有设置推送时间，则总是推送
+def push_to_push_plus(exec_results: list[dict[str, Any]], summary: str, config: PushConfig) -> None:
+    """推送到 PushPlus。"""
+    if not config.push_plus_token or config.push_plus_token == "NO":
+        print("未配置 PUSH_PLUS_TOKEN，跳过 pushplus 推送。")
+        return
 
-    time_bj = get_beijing_time()
-
-    # 首先根据时间判断，如果匹配 直接返回
-    if config.push_plus_hour.isdigit():
-        if time_bj.hour == int(config.push_plus_hour):
-            print(f"当前设置推送整点为：{config.push_plus_hour}, 当前整点为：{time_bj.hour}，执行推送")
-            return False
-
-    # 如果时间不匹配，检查cron_change_time文件中的记录
-    # 读取cron_change_time文件中的最后一行数据：“next exec time: UTC(7:35) 北京时间(15:35)” 中的整点数
-    # 然后用来对比是否当前时间，避免因为Actions执行延迟导致推送失效
-    try:
-        with open('cron_change_time', 'r') as f:
-            lines = f.readlines()
-            if lines:
-                last_line = lines[-1].strip()
-                # 提取北京时间的小时数
-                import re
-                match = re.search(r'北京时间\(0?(\d+):\d+\)', last_line)
-                if match:
-                    cron_hour = int(match.group(1))
-                    if int(config.push_plus_hour) == cron_hour:
-                        print(
-                            f"当前设置推送整点为：{config.push_plus_hour}, 根据执行记录，本次执行整点为：{cron_hour}，执行推送")
-                        return False
-    except Exception as e:
-        print(f"读取cron_change_time文件出错: {e}")
-    print(f"当前整点时间为：{time_bj}，不在配置的推送时间，不执行推送")
-    return True
-
-
-def push_to_push_plus(exec_results, summary, config: PushConfig):
-    """推送到PushPlus"""
-    # 判断是否需要pushplus推送
-    if config.push_plus_token and config.push_plus_token != '' and config.push_plus_token != 'NO':
-        html = f'<div>{summary}</div>'
-        if len(exec_results) >= config.push_plus_max:
-            html += '<div>账号数量过多，详细情况请前往github actions中查看</div>'
-        else:
-            html += '<ul>'
-            for exec_result in exec_results:
-                success = exec_result['success']
-                if success is not None and success is True:
-                    html += f'<li><span>账号：{exec_result["user"]}</span>刷步数成功，接口返回：{exec_result["msg"]}</li>'
-                else:
-                    html += f'<li><span>账号：{exec_result["user"]}</span>刷步数失败，失败原因：{exec_result["msg"]}</li>'
-            html += '</ul>'
-        push_plus(config.push_plus_token, f"{format_now()} 刷步数通知", html)
+    html = f"<div>{summary}</div>"
+    if len(exec_results) > config.push_plus_max:
+        html += "<div>账号数量过多，请查看本地日志输出获取完整结果。</div>"
     else:
-        print("未配置 PUSH_PLUS_TOKEN 跳过PUSHPLUS推送")
+        html += "<ul>"
+        for exec_result in exec_results:
+            if exec_result["success"]:
+                html += (
+                    f'<li><span>账号：{exec_result["user"]}</span>'
+                    f'刷步数成功，接口返回：{exec_result["msg"]}</li>'
+                )
+            else:
+                html += (
+                    f'<li><span>账号：{exec_result["user"]}</span>'
+                    f'刷步数失败，失败原因：{exec_result["msg"]}</li>'
+                )
+        html += "</ul>"
+
+    push_plus(config.push_plus_token, f"{format_now()} 刷步数通知", html)
 
 
-def push_to_wechat_webhook(exec_results, summary, config: PushConfig):
-    """推送到企业微信"""
-    # 判断是否需要微信推送
-    if config.push_wechat_webhook_key and config.push_wechat_webhook_key != '' and config.push_wechat_webhook_key != 'NO':
+def push_to_wechat_webhook(exec_results: list[dict[str, Any]], summary: str, config: PushConfig) -> None:
+    """推送到企业微信。"""
+    if not config.push_wechat_webhook_key or config.push_wechat_webhook_key == "NO":
+        print("未配置 PUSH_WECHAT_WEBHOOK_KEY，跳过企业微信推送。")
+        return
 
-        content = f'## {summary}'
-        if len(exec_results) >= config.push_plus_max:
-            content += '\n- 账号数量过多，详细情况请前往github actions中查看'
-        else:
-            for exec_result in exec_results:
-                success = exec_result['success']
-                if success is not None and success is True:
-                    content += f'\n- 账号：{exec_result["user"]}刷步数成功，接口返回：{exec_result["msg"]}'
-                else:
-                    content += f'\n- 账号：{exec_result["user"]}刷步数失败，失败原因：{exec_result["msg"]}'
-        push_wechat_webhook(config.push_wechat_webhook_key, f"{format_now()} 刷步数通知", content)
+    content = f"## {summary}"
+    if len(exec_results) > config.push_plus_max:
+        content += "\n- 账号数量过多，请查看本地日志输出获取完整结果。"
     else:
-        print("未配置 WECHAT_WEBHOOK_KEY 跳过微信推送")
+        for exec_result in exec_results:
+            if exec_result["success"]:
+                content += f'\n- 账号：{exec_result["user"]} 刷步数成功，接口返回：{exec_result["msg"]}'
+            else:
+                content += f'\n- 账号：{exec_result["user"]} 刷步数失败，失败原因：{exec_result["msg"]}'
+
+    push_wechat_webhook(config.push_wechat_webhook_key, f"{format_now()} 刷步数通知", content)
 
 
-def push_to_telegram_bot(exec_results, summary, config: PushConfig):
-    """推送到Telegram"""
-    # 判断是否需要telegram推送
-    if (config.telegram_bot_token and config.telegram_bot_token != '' and config.telegram_bot_token != 'NO' and
-            config.telegram_chat_id and config.telegram_chat_id != ''):
-        html = f'<b>{summary}</b>'
-        if len(exec_results) >= config.push_plus_max:
-            html += '<blockquote>账号数量过多，详细情况请前往github actions中查看</blockquote>'
-        else:
-            for exec_result in exec_results:
-                success = exec_result['success']
-                if success is not None and success is True:
-                    html += f'<pre><blockquote>账号：{exec_result["user"]}</blockquote>刷步数成功，接口返回：<b>{exec_result["msg"]}</b></pre>'
-                else:
-                    html += f'<pre><blockquote>账号：{exec_result["user"]}</blockquote>刷步数失败，失败原因：<b>{exec_result["msg"]}</b></pre>'
-        push_telegram_bot(config.telegram_bot_token, config.telegram_chat_id, html)
+def push_to_telegram_bot(exec_results: list[dict[str, Any]], summary: str, config: PushConfig) -> None:
+    """推送到 Telegram。"""
+    if not config.telegram_bot_token or config.telegram_bot_token == "NO":
+        print("未配置 TELEGRAM_BOT_TOKEN，跳过 telegram 推送。")
+        return
+    if not config.telegram_chat_id:
+        print("未配置 TELEGRAM_CHAT_ID，跳过 telegram 推送。")
+        return
+
+    html = f"<b>{summary}</b>"
+    if len(exec_results) > config.push_plus_max:
+        html += "<blockquote>账号数量过多，请查看本地日志输出获取完整结果。</blockquote>"
     else:
-        print("未配置 TELEGRAM_BOT_TOKEN 或 TELEGRAM_CHAT_ID 跳过telegram推送")
+        for exec_result in exec_results:
+            if exec_result["success"]:
+                html += (
+                    f'<pre><blockquote>账号：{exec_result["user"]}</blockquote>'
+                    f'刷步数成功，接口返回：<b>{exec_result["msg"]}</b></pre>'
+                )
+            else:
+                html += (
+                    f'<pre><blockquote>账号：{exec_result["user"]}</blockquote>'
+                    f'刷步数失败，失败原因：<b>{exec_result["msg"]}</b></pre>'
+                )
+
+    push_telegram_bot(config.telegram_bot_token, config.telegram_chat_id, html)

@@ -36,30 +36,20 @@ def _validate_key(key: bytes):
 def encrypt_data(plain: bytes, key: bytes, iv: bytes | None = None) -> bytes:
     """
     返回：IV（16B） + ciphertext（bytes） 或者仅ciphertext（当使用固定IV时）
-    参数：
-      - plain: 明文字节
-      - key: 16 字节 AES-128 密钥
-      - iv: IV向量，如果为None则生成随机IV
     """
     _validate_key(key)
     if not isinstance(plain, (bytes, bytearray)):
         raise TypeError("plain must be bytes")
 
+    prepend_iv = iv is None
     if iv is None:
-        # 使用随机IV
         iv = get_random_bytes(AES_BLOCK_SIZE)
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        padded = _pkcs7_pad(plain)
-        ciphertext = cipher.encrypt(padded)
-        return iv + ciphertext
-    else:
-        # 使用固定IV
-        if len(iv) != AES_BLOCK_SIZE:
-            raise ValueError(f"IV must be {AES_BLOCK_SIZE} bytes")
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        padded = _pkcs7_pad(plain)
-        ciphertext = cipher.encrypt(padded)
-        return ciphertext
+    elif len(iv) != AES_BLOCK_SIZE:
+        raise ValueError(f"IV must be {AES_BLOCK_SIZE} bytes")
+
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    ciphertext = cipher.encrypt(_pkcs7_pad(plain))
+    return (iv + ciphertext) if prepend_iv else ciphertext
 
 
 def decrypt_data(data: bytes, key: bytes, iv: bytes | None = None) -> bytes:
@@ -72,49 +62,23 @@ def decrypt_data(data: bytes, key: bytes, iv: bytes | None = None) -> bytes:
         raise TypeError("data must be bytes")
 
     if iv is None:
-        # 从数据中提取IV（假设前16字节是IV）
         if len(data) < AES_BLOCK_SIZE:
             raise ValueError("data too short")
-
         iv = data[:AES_BLOCK_SIZE]
         ciphertext = data[AES_BLOCK_SIZE:]
-
-        if len(ciphertext) == 0 or len(ciphertext) % AES_BLOCK_SIZE != 0:
-            raise ValueError("invalid ciphertext length")
     else:
-        # 使用提供的固定IV
         if len(iv) != AES_BLOCK_SIZE:
             raise ValueError(f"IV must be {AES_BLOCK_SIZE} bytes")
         ciphertext = data
-        if len(ciphertext) == 0 or len(ciphertext) % AES_BLOCK_SIZE != 0:
-            raise ValueError("invalid ciphertext length")
+
+    if len(ciphertext) == 0 or len(ciphertext) % AES_BLOCK_SIZE != 0:
+        raise ValueError("invalid ciphertext length")
 
     cipher = AES.new(key, AES.MODE_CBC, iv)
     decrypted_padded = cipher.decrypt(ciphertext)
     return _pkcs7_unpad(decrypted_padded)
 
 
-def bytes_to_base64(data: bytes) -> str:
-    """
-    将字节数据转换为Base64编码字符串
-    
-    Args:
-        data: 需要编码的字节数据
-        
-    Returns:
-        Base64编码的字符串
-    """
-    return base64.b64encode(data).decode('utf-8')
-
-
 def base64_to_bytes(data: str) -> bytes:
-    """
-    将Base64编码字符串转换为字节数据
-    
-    Args:
-        data: Base64编码的字符串
-        
-    Returns:
-        解码后的字节数据
-    """
+    """供 local/decrypt_data.py 调试脚本使用。"""
     return base64.b64decode(data.encode('utf-8'))

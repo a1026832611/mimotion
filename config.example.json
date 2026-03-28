@@ -1,0 +1,14 @@
+{
+  "USER": "13800138000#example@email.com",
+  "PWD": "password1#password2",
+  "MIN_STEP": "18000",
+  "MAX_STEP": "20000",
+  "PUSH_PLUS_TOKEN": "",
+  "PUSH_PLUS_HOUR": "",
+  "PUSH_PLUS_MAX": "30",
+  "PUSH_WECHAT_WEBHOOK_KEY": "",
+  "TELEGRAM_BOT_TOKEN": "",
+  "TELEGRAM_CHAT_ID": "",
+  "SLEEP_GAP": "5",
+  "USE_CONCURRENT": "False"
+}
